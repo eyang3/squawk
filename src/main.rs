@@ -1,0 +1,148 @@
+extern crate serde_derive;
+use actix_session::Session;
+use actix_session::{storage::CookieSessionStore, SessionMiddleware};
+use actix_web::http::header;
+use actix_web::{web, App, HttpResponse, HttpServer};
+use data_encoding::HEXUPPER;
+use oauth2::basic::BasicClient;
+use oauth2::{
+    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge, RedirectUrl,
+    Scope, TokenUrl,
+};
+use serde_derive::Deserialize;
+use std::env;
+
+mod db;
+mod types;
+mod users;
+
+struct AppState {
+    oauth: BasicClient,
+}
+
+fn index(session: Session) -> HttpResponse {
+    let link = if let Some(_login) = session.get::<bool>("login").unwrap() {
+        "logout"
+    } else {
+        "login"
+    };
+
+    let html = format!(
+        r#"<html>
+        <head><title>OAuth2 Test</title></head>
+        <body>
+            <a href="/{}">{}</a>
+        </body>
+    </html>"#,
+        link, link
+    );
+
+    HttpResponse::Ok().body(html)
+}
+
+fn login(data: web::Data<AppState>) -> HttpResponse {
+    // Google supports Proof Key for Code Exchange (PKCE - https://oauth.net/2/pkce/).
+    // Create a PKCE code verifier and SHA-256 encode it as a code challenge.
+    let (pkce_code_challenge, _pkce_code_verifier) = PkceCodeChallenge::new_random_sha256();
+
+    // Generate the authorization URL to which we'll redirect the user.
+    let (authorize_url, _csrf_state) = &data
+        .oauth
+        .authorize_url(CsrfToken::new_random)
+        // This example is requesting access to the "calendar" features and the user's profile.
+        .set_pkce_challenge(pkce_code_challenge)
+        .url();
+
+    HttpResponse::Found()
+        .header(header::LOCATION, authorize_url.to_string())
+        .finish()
+}
+
+fn logout(session: Session) -> HttpResponse {
+    session.remove("login");
+    HttpResponse::Found()
+        .header(header::LOCATION, "/".to_string())
+        .finish()
+}
+
+#[derive(Deserialize)]
+pub struct AuthRequest {
+    code: String,
+    state: String,
+    scope: String,
+}
+
+fn auth(
+    session: Session,
+    data: web::Data<AppState>,
+    params: web::Query<AuthRequest>,
+) -> HttpResponse {
+    let code = AuthorizationCode::new(params.code.clone());
+    let state = CsrfToken::new(params.state.clone());
+    let _scope = params.scope.clone();
+
+    // Exchange the code with a token.
+    let token = &data.oauth.exchange_code(code);
+    let html = format!(
+        r#"<html>
+        <head><title>OAuth2 Test</title></head>
+        <body>
+            Google returned the following state:
+            <pre>{}</pre>
+            Google returned the following token:
+            <pre>{:?}</pre>
+        </body>
+    </html>"#,
+        state.secret(),
+        token
+    );
+    HttpResponse::Ok().body(html)
+}
+
+fn main() {
+    let salt = users::create_salt();
+    let salt_str = HEXUPPER.encode(&salt);
+    print!("{}", salt_str);
+    HttpServer::new(|| App::new().service(users::create));
+}
+/* fn main() {
+    HttpServer::new(|| {
+        let google_client_id = ClientId::new(
+            env::var("GOOGLE_CLIENT_ID")
+                .expect("Missing the GOOGLE_CLIENT_ID environment variable."),
+        );
+        let google_client_secret = ClientSecret::new(
+            env::var("GOOGLE_CLIENT_SECRET")
+                .expect("Missing the GOOGLE_CLIENT_SECRET environment variable."),
+        );
+        let auth_url = AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string())
+            .expect("Invalid authorization endpoint URL");
+        let token_url = TokenUrl::new("https://www.googleapis.com/oauth2/v3/token".to_string())
+            .expect("Invalid token endpoint URL");
+
+        // Set up the config for the Google OAuth2 process.
+        let client = BasicClient::new(
+            google_client_id,
+            Some(google_client_secret),
+            auth_url,
+            Some(token_url),
+        )
+        .set_redirect_url(
+            RedirectUrl::new("http://127.0.0.1:5000/auth".to_string())
+                .expect("Invalid redirect URL"),
+        );
+
+        App::new()
+            .data(AppState { oauth: client })
+            .wrap(CookieSession::signed(&[0; 32]).secure(false))
+            .route("/", web::get().to(index))
+            .route("/login", web::get().to(login))
+            .route("/logout", web::get().to(logout))
+            .route("/auth", web::get().to(auth))
+    })
+    .bind("127.0.0.1:5000")
+    .expect("Can not bind to port 5000")
+    .run()
+    .await
+    .unwrap();
+} */
