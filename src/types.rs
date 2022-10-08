@@ -18,8 +18,8 @@ use std::time::SystemTime;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Users {
     pub id: i32,
-    pub email: String,
     pub userid: String,
+    pub email: String,
     pub username: String,
     pub name: String,
     pub avatar_src: String,
@@ -28,6 +28,17 @@ pub struct Users {
     pub isgoogle: bool,
     pub googleid: String,
     pub ip: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct UserRequest {
+    pub email: String,
+    pub username: String,
+    pub name: String,
+    pub avatar_src: String,
+    pub password: String,
+    pub isgoogle: bool,
+    pub googleid: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
